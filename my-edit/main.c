@@ -13,7 +13,9 @@ typedef struct {
     GtkWidget *text_view;
 } TextViewData;
 
-static void set_notebook_tabs();
+static void set_show_notebook_tabs();
+static void set_notebook_tab_label(gchar *labelText, GtkWidget *child);
+static void close_notebook_tab(GtkButton *button, GtkWidget *data);
 
 static void print_array()
 {
@@ -25,11 +27,11 @@ static void print_array()
     }
 }
 
-const char *get_basename_from_path(const char *path)
+gchar *get_basename_from_path(const char *path)
 {
     GFile *gFile;
     GFileInfo *gFileInfo;
-    const gchar *basename;
+    gchar *basename;
 
     gFile     = g_file_new_for_path(path);
     gFileInfo = g_file_query_info(gFile, G_FILE_ATTRIBUTE_STANDARD_DISPLAY_NAME, G_FILE_QUERY_INFO_NONE, NULL, NULL);
@@ -97,8 +99,8 @@ static void choose_file(GtkButton *button, gpointer *data)
             currentScrolledWindow = gtk_scrolled_window_new(NULL, NULL);
             currentTextView = gtk_text_view_new();
             gtk_container_add(GTK_CONTAINER(currentScrolledWindow), currentTextView);
-
             pageNumber = gtk_notebook_append_page(GTK_NOTEBOOK(noteBook), currentScrolledWindow, NULL);
+
             // reget buffer content
             buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(currentTextView));
             gtk_text_buffer_get_bounds(buffer, &start, &end);
@@ -109,10 +111,10 @@ static void choose_file(GtkButton *button, gpointer *data)
             gtk_text_buffer_set_text(buffer, contents, -1);
         }
 
+        // set tab label
+        set_notebook_tab_label(get_basename_from_path(filename), currentScrolledWindow);
         // insert text_view_array
         insert_to_text_view_array(TRUE, pageNumber, filename, currentScrolledWindow, currentTextView);
-        // set tab label
-        gtk_notebook_set_tab_label_text(GTK_NOTEBOOK(noteBook), currentScrolledWindow, get_basename_from_path(filename));
         // show
         gtk_widget_show_all(GTK_WIDGET(window));
         gtk_notebook_set_current_page(GTK_NOTEBOOK(noteBook), pageNumber);
@@ -120,11 +122,27 @@ static void choose_file(GtkButton *button, gpointer *data)
 
     // print_array();
     gtk_widget_destroy(dialog);
-    set_notebook_tabs();
+    set_show_notebook_tabs();
 }
 
 static void new_document(GtkButton *button, gpointer *data)
 {
+    GtkWidget *newScrolledWindow = gtk_scrolled_window_new(NULL, NULL);
+    GtkWidget *newTextView = gtk_text_view_new();
+    gtk_container_add(GTK_CONTAINER(newScrolledWindow), newTextView);
+    gint pageNumber = gtk_notebook_append_page(GTK_NOTEBOOK(noteBook), newScrolledWindow, NULL);
+
+    char labelSuffix[2];
+    sprintf(labelSuffix, "%d", pageNumber);
+    gchar *labelText  = g_strjoin(" ", "Untitled Doc", labelSuffix, NULL);
+    set_notebook_tab_label(labelText, newScrolledWindow);
+
+    insert_to_text_view_array(FALSE, pageNumber, labelText, newScrolledWindow, newTextView);
+
+    set_show_notebook_tabs();
+
+    gtk_widget_show_all(GTK_WIDGET(window));
+    gtk_notebook_set_current_page(GTK_NOTEBOOK(noteBook), pageNumber);
 }
 
 static void save_file(GtkButton *button, gpointer *data)
@@ -175,12 +193,41 @@ static void save_file(GtkButton *button, gpointer *data)
     g_free(contents);
 }
 
-static void set_notebook_tabs()
+static void set_show_notebook_tabs()
 {
     if (text_view_array->len == 1) {
         gtk_notebook_set_show_tabs(GTK_NOTEBOOK(noteBook), FALSE);
     } else {
         gtk_notebook_set_show_tabs(GTK_NOTEBOOK(noteBook), TRUE);
+    }
+}
+
+static void set_notebook_tab_label(gchar *labelText, GtkWidget *child)
+{
+    GtkWidget *tabBox, *label, *closeBtn;
+
+    tabBox   = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+    label    = gtk_label_new(labelText);
+    closeBtn = gtk_button_new_from_icon_name("window-close-symbolic", GTK_ICON_SIZE_SMALL_TOOLBAR);
+
+    gtk_button_set_relief(GTK_BUTTON(closeBtn), GTK_RELIEF_NONE);
+    gtk_box_pack_start(GTK_BOX(tabBox), label, TRUE, TRUE, 0);
+    gtk_box_pack_end(GTK_BOX(tabBox), closeBtn, FALSE, FALSE, 0);
+    gtk_widget_show_all(tabBox);
+
+    gtk_notebook_set_tab_label(GTK_NOTEBOOK(noteBook), child, tabBox);
+    // close tab callback
+    g_signal_connect(closeBtn, "clicked", G_CALLBACK(close_notebook_tab), child);
+}
+
+static void close_notebook_tab(GtkButton *button, GtkWidget *data)
+{
+    gint pageNumber = gtk_notebook_page_num(GTK_NOTEBOOK(noteBook), data);
+    if (pageNumber > -1) {
+        // remove page from notebook
+        gtk_notebook_remove_page(GTK_NOTEBOOK(noteBook), pageNumber);
+        // remove from garray
+        g_array_remove_index(text_view_array, pageNumber);
     }
 }
 
@@ -192,13 +239,14 @@ static void init_notebook()
 
     noteBook = gtk_notebook_new();
     gtk_notebook_set_scrollable(GTK_NOTEBOOK(noteBook), TRUE);
-    gint pageNumber = gtk_notebook_append_page(GTK_NOTEBOOK(noteBook), newScrolledWindow, NULL);
-    gtk_notebook_set_tab_label_text(GTK_NOTEBOOK(noteBook), newScrolledWindow, "Untitled Doc");
+    gint pageNumber   = gtk_notebook_append_page(GTK_NOTEBOOK(noteBook), newScrolledWindow, NULL);
 
-    g_print("%d\n", pageNumber);
-    insert_to_text_view_array(FALSE, pageNumber, "Untitled Doc", newScrolledWindow, newTextView);
+    gchar *labelText  = "Untitled Doc";
+    set_notebook_tab_label(labelText, newScrolledWindow);
 
-    set_notebook_tabs();
+    insert_to_text_view_array(FALSE, pageNumber, labelText, newScrolledWindow, newTextView);
+
+    set_show_notebook_tabs();
 }
 
 static void create_ui()
@@ -233,7 +281,7 @@ static void create_ui()
     gtk_header_bar_pack_end(GTK_HEADER_BAR(headerBar), saveBtn);
     gtk_widget_add_accelerator(saveBtn, "clicked", accelGroup, GDK_KEY_s, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
     // close btn
-    gtk_header_bar_set_show_close_button (GTK_HEADER_BAR(headerBar), TRUE);
+    gtk_header_bar_set_show_close_button(GTK_HEADER_BAR(headerBar), TRUE);
     // textview
     init_notebook();
     gtk_container_add(GTK_CONTAINER(window), noteBook);
